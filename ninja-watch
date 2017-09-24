@@ -5,24 +5,86 @@ import os
 import argparse
 import subprocess
 import time
+import re
 
-def get_list(ninja_args, root):
+LANG_EXT_MAP = {
+    'cpp': ['.h', '.cpp'],
+    'rust': ['.rs']
+}
+
+LANG_SFILES_MAP = {
+    'cpp': [],
+    'rust': ['Cargo.toml']
+}
+
+def get_fileexts(langs):
+    file_exts = [LANG_EXT_MAP[x] for x in langs]
+    file_exts = sum(file_exts, []) # flatten list
+    file_exts = list(set(file_exts)) # make unique
+    return file_exts
+
+def get_special_files(root, langs):
+    filenames = [LANG_SFILES_MAP[x] for x in langs]
+    filenames = sum(filenames, []) # flatten
+    filenames += ['meson.build']
+    res = []
+    for root, dirs, files in os.walk(root):
+        for f in files:
+            if any([f == filename for filename in filenames]):
+                res.append(os.path.join(root, f))
+    return res
+
+# Get languages from configure system (mesonbuild...)
+def get_metadata(buildroot):
+    with open(os.path.join(buildroot, 'build.ninja')) as ninjafile:
+        ninja = ninjafile.read().strip()
+        match = re.search(r'regenerate[\s]*([^\s]*)', ninja)
+        if match:
+            srcroot = match.group(1)
+            mesonfilename = os.path.join(srcroot, 'meson.build')
+        else:
+            return ('', [])
+        with open(mesonfilename) as mesonfile:
+            meson = mesonfile.read().strip()
+            match = re.search(r'project\([^,]*,[\s]*((\'[^\']*\'[\s,]*)+)', meson)
+            if match:
+                langs = match.group(1).strip(',').split(',')
+                langs = [x.strip().strip('\'') for x in langs]
+                langs = [x for x in langs if x != '']
+                return (srcroot, langs)
+    return ('', [])
+
+
+def get_list(ninja_args, buildroot):
     try:
-        deps = subprocess.check_output(['ninja'] + ninja_args).decode('utf-8').strip().split('\n')
+        deps = subprocess.check_output(['ninja'] + ninja_args)
+        deps = deps.decode('utf-8').strip().split('\n')
     except subprocess.CalledProcessError:
         return []
+    (srcroot, langs) = get_metadata(buildroot)
+    exts = get_fileexts(langs)
+    special_files = get_special_files(srcroot, langs)
     deps = [x.strip() for x in deps]
-    deps = [x for x in deps if x.endswith('.cpp') or x.endswith('.h')]
-    deps = [os.path.abspath(os.path.join(root, x)) for x in deps]
+    deps = [x for x in deps if any([x.endswith(ext) for ext in exts])]
+    deps = [os.path.abspath(os.path.join(buildroot, x)) for x in deps]
+    deps += special_files
     deps = list(set(deps)) # Make unique
+    print(deps)
 
     dirs = [os.path.dirname(x) for x in deps]
     dirs = list(set(dirs)) # Make unique
     return deps + dirs
 
 def main(argv):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-C', nargs='?')
+    parser = argparse.ArgumentParser(
+        description='''Rerun ninja as soon as files are modified or created.
+        All arguments (except -h) will be passed through to ninja.'''
+    )
+    parser.add_argument(
+        '-C',
+        nargs='?',
+        help='Which directory to run `ninja-build -t deps` in'
+    )
     (args, _) = parser.parse_known_args(argv)
 
     ninja_args = ['-t', 'deps']
@@ -31,7 +93,7 @@ def main(argv):
 
     while True:
         subprocess.call(['ninja'] + sys.argv[1:])
-        deps = get_list(ninja_args, args.C if args.C else '')
+        deps = get_list(ninja_args, args.C if args.C else '.')
         if deps:
             subprocess.call(
                 ['inotifywait', '-qq', '-e', 'modify,create'] + deps
