@@ -8,11 +8,13 @@ import time
 import re
 
 LANG_EXT_MAP = {
+    'c': ['.c', '.h'],
     'cpp': ['.h', '.cpp'],
     'rust': ['.rs']
 }
 
 LANG_SFILES_MAP = {
+    'c': [],
     'cpp': [],
     'rust': ['Cargo.toml']
 }
@@ -69,7 +71,6 @@ def get_list(ninja_args, buildroot):
     deps = [os.path.abspath(os.path.join(buildroot, x)) for x in deps]
     deps += special_files
     deps = list(set(deps)) # Make unique
-    print(deps)
 
     dirs = [os.path.dirname(x) for x in deps]
     dirs = list(set(dirs)) # Make unique
