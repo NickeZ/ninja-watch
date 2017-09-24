@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+
+import sys
+import os
+import argparse
+import subprocess
+import time
+
+def get_list(ninja_args, root):
+    try:
+        deps = subprocess.check_output(['ninja'] + ninja_args).decode('utf-8').strip().split('\n')
+    except subprocess.CalledProcessError:
+        return []
+    deps = [x.strip() for x in deps]
+    deps = [x for x in deps if x.endswith('.cpp') or x.endswith('.h')]
+    deps = [os.path.abspath(os.path.join(root, x)) for x in deps]
+    deps = list(set(deps)) # Make unique
+
+    dirs = [os.path.dirname(x) for x in deps]
+    dirs = list(set(dirs)) # Make unique
+    return deps + dirs
+
+def main(argv):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-C', nargs='?')
+    (args, _) = parser.parse_known_args(argv)
+
+    ninja_args = ['-t', 'deps']
+    if args.C:
+        ninja_args = ['-C', args.C] + ninja_args
+
+    while True:
+        subprocess.call(['ninja'] + sys.argv[1:])
+        deps = get_list(ninja_args, args.C if args.C else '')
+        if deps:
+            subprocess.call(
+                ['inotifywait', '-qq', '-e', 'modify,create'] + deps
+            )
+            time.sleep(0.1)
+        else:
+            print("ninja-watch: fatal: could not find any sources", file=sys.stderr)
+            time.sleep(5)
+
+if __name__ == '__main__':
+    try:
+        main(sys.argv[1:])
+    except KeyboardInterrupt:
+        pass
