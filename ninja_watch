@@ -26,7 +26,7 @@ LANG_SFILES_MAP: Dict[str, List] = {
 
 
 def eprint(*args):
-    print(*args, file=sys.stderr)
+    print('ninja-watch: {}'.format(*args), file=sys.stderr)
 
 
 def flatten(container: Sequence[List[T]]) -> List[T]:
@@ -124,18 +124,24 @@ def main(argv):
                     'inotifywait',
                     '-q',
                     '--format', '%e: %w %f',
-                    '-e', 'modify,create'
+                    '-e', 'modify'
                 ] + deps
             )
             eprint("Triggered by {}".format(output.decode('utf-8')))
             time.sleep(0.5)
         else:
-            eprint("ninja-watch: fatal: could not find any sources")
+            eprint("fatal: could not find any sources")
             time.sleep(5)
 
 
 if __name__ == '__main__':
-    try:
-        main(sys.argv[1:])
-    except KeyboardInterrupt:
-        pass
+    eprint('Press CTRL+C twice to exit')
+    while True:
+        try:
+            main(sys.argv[1:])
+        except KeyboardInterrupt:
+            eprint('Rebuilding. If you want to quit press CTRL+C again')
+            try:
+                time.sleep(1)
+            except KeyboardInterrupt:
+                break
